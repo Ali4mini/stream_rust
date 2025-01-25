@@ -1,13 +1,29 @@
+use axum::Router;
 use clap::Parser;
 use std::fs;
 use std::io;
+use std::net::SocketAddr;
 use std::process::Command;
+use tower_http::services::ServeDir;
 
 #[derive(Parser)]
 #[command(version, about)]
 struct Args {
     #[arg(short, long)]
     file: String,
+}
+
+async fn start_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    // serving the `tmp/` directory
+    let address = SocketAddr::from(([0, 0, 0, 0], port));
+    let listener = tokio::net::TcpListener::bind(address).await.unwrap();
+    dbg!("started listener on: {}", &listener);
+
+    let router = Router::new().nest_service("/assets", ServeDir::new("./tmp/"));
+
+    let server_status = axum::serve(listener, router).await?;
+
+    Ok(server_status)
 }
 
 fn make_playlist(input_file: String) -> Result<String, io::Error> {
@@ -19,16 +35,18 @@ fn make_playlist(input_file: String) -> Result<String, io::Error> {
         .args(&[
             "-i",
             &input_file,
-            "-codec",
-            "copy",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-f",
+            "hls",
             "-start_number",
             "0",
             "-hls_time",
             "10",
             "-hls_list_size",
             "0",
-            "-f",
-            "hls",
             &output_file,
         ])
         .status()?;
@@ -43,13 +61,22 @@ fn make_playlist(input_file: String) -> Result<String, io::Error> {
     Ok(output_file)
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = Args::parse();
 
     let result = make_playlist(args.file);
 
     match result {
         Err(error) => eprintln!("there was an error in the main! {}", error),
-        _ => (),
+        Ok(_) => {
+            const PORT: u16 = 8787; // change this for changing the workin port on the host
+            let server_status = start_server(PORT).await;
+
+            match server_status {
+                Err(err) => eprintln!("ther was an error in the start_server, {}", err),
+                _ => (),
+            }
+        }
     }
 }
