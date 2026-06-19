@@ -1,5 +1,10 @@
 use axum::Router;
 use clap::Parser;
+use core::option::Option;
+use core::option::Option::None;
+use core::result::Result;
+use core::result::Result::Ok;
+use core::unreachable;
 use std::fs;
 use std::io;
 use std::net::SocketAddr;
@@ -9,21 +14,37 @@ use tower_http::services::ServeDir;
 #[derive(Parser)]
 #[command(version, about)]
 struct Args {
-    #[arg(short, long)]
-    file: String,
+    #[arg(short, long, group = "input")]
+    file: Option<String>,
+
+    #[arg(short, long, group = "input")]
+    directory: Option<String>,
 }
 
 async fn start_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     // serving the `tmp/` directory
     let address = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(address).await.unwrap();
-    dbg!("started listener on: {}", &listener);
 
-    let router = Router::new().nest_service("/assets", ServeDir::new("./tmp/"));
+    let assets_router = Router::new().nest_service("/assets", ServeDir::new("./tmp/"));
+    // let service_router = Router::new()
 
-    let server_status = axum::serve(listener, router).await?;
+    let server_status = axum::serve(listener, assets_router).await?;
 
     Ok(server_status)
+}
+
+// an endpoint to show the available musics
+fn show_dir_songs(input_dir: String) -> Result<String, io::Error> {
+    for file in fs::read_dir(input_dir)? {
+        let file = file?;
+        let file_name = file.file_name();
+
+        println!("{}", file_name.to_string_lossy())
+    }
+
+    let temp_string = String::from("all good");
+    Ok(temp_string)
 }
 
 fn make_playlist(input_file: String) -> Result<String, io::Error> {
@@ -64,8 +85,13 @@ fn make_playlist(input_file: String) -> Result<String, io::Error> {
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
+    let result: Result<String, io::Error>;
 
-    let result = make_playlist(args.file);
+    match (args.file, args.directory) {
+        (Some(file), None) => result = make_playlist(file),
+        (None, Some(dir)) => result = show_dir_songs(dir),
+        _ => unreachable!(),
+    }
 
     match result {
         Err(error) => eprintln!("there was an error in the main! {}", error),
